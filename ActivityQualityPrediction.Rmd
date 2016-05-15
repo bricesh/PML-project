@@ -1,0 +1,163 @@
+---
+title: "Activity Quality Prediction"
+author: "Brice Hoareau"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(knitr)
+load("C:/Dropbox/Education/Rwd/PML project/.RData")
+```
+
+#Synopsis
+The aim of this assignment was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 subjects to develop a machine learning algorithm to quantify how well each exercise is carried out.
+
+After careful analysis and cleansing of the data, a subset of the variables was selected as features for the model. The feature selection process mainly consisted of removing 'summary' variables of each data window as well as highly correlated predictors.
+
+The chosen algorithm was Random Forest because it is less sensitive to skewed and unnormalised data than other models. Due to time constraints, no other algorithm was investigated (although other models would possibly result in performance improvements).
+
+The accuracy score obtained by the trained Random Forest model on the whole dataset was **99.31%**. A score of **95%** was obtained for Course Project Prediction Quiz.
+
+
+#Exploratory Analysis
+Following an initial exploration (using the *str()* and *summary()* functions) of the data provided as well as the study of the accompanying literature, it was the author's belief that the features for the model should be the variables that summarise each window of activity. Indeed it would make sense that in order to quantify the quality of a movement, a representation of the whole movement should be taken into account as opposed to a snapshot of a particular position at a specific time.
+
+However, close examination of the summary variables in the dataset revealed that these were not reliable:
+
+- the summary variable values for each window could not be verified by carrying out the necessary calculations (e.g. max, min etc.).
+- an offset in the columns' labelling seems to exist.
+- many values were missing.
+
+Furthermore, the provided test data did not represent a time window of samples but rather a specific sample. The rational must be that the combination of predictors for each observation time should be sufficient to classify the quality of the exercise correctly.
+
+All variables were visualised during this phase of the assignment and most presented similar problems. The following histograms highlight these issues:
+
+1. some of the variables are bimodal e.g. *total_accel_belt*
+
+```{r echo=FALSE}
+g <- ggplot(data = cleansed.data, aes(x = total_accel_belt, fill = user_name))
+g <- g + geom_histogram(binwidth = 1)
+g <- g + facet_wrap(~classe)
+g
+```
+
+2. some of the variables are skewed e.g. *yaw_dumbbell*
+
+```{r echo=FALSE}
+g <- ggplot(data = cleansed.data, aes(x = yaw_dumbbell, fill = user_name))
+g <- g + geom_histogram(binwidth = 10)
+g <- g + facet_wrap(~classe)
+g
+```
+
+Neither of these issues has been fixed for this assignment but their effect should be mitigated by the use of the Random Forest algorithm.
+
+The final visualisation carried out was a variable correlation plot: 
+```{r eval=FALSE}
+belt.col.id <- grep("_belt", colnames(cleansed.data))
+arm.col.id <- grep("_arm", colnames(cleansed.data))
+dumbbell.col.id <- grep("_dumbbell", colnames(cleansed.data))
+forearm.col.id <- grep("_forearm", colnames(cleansed.data))
+
+training.data <- cleansed.data[ ,c(2, arm.col.id, belt.col.id, dumbbell.col.id, forearm.col.id, 60)]
+training.data.num.only <- training.data[,-c(1, 54)]
+
+data.cor <- cor(training.data.num.only)
+corrplot(data.cor, order = "hclust")
+```
+
+```{r echo=FALSE}
+corrplot(data.cor, order = "hclust")
+```
+
+This plot confirmed that a number of variables a correlated to each other and will need to be taken care of during the feature selection process.
+
+#Data Cleansing
+The data visualisation undertaken during the exploration phase of this assignment exposed some outliers:
+
+1. Row 537 of the supplied data contains many value outliers. The author speculates that these correspond to incorrect measurements. Imputing new values for all variables seemed difficult so the approach chosen was to remove the entire observation (row).
+
+```{r eval=FALSE}
+raw.data <- read.csv("pml-training.csv")
+cleansed.data <- raw.data
+cleansed.data <- cleansed.data[-5373,]
+```
+
+2. Row $X == 9274$ contains an outlier in *magnet_dumbbell_y* which seems to be an incorrect measurement. This value was fixed by imputing with average of window for the predictor.
+
+```{r eval=FALSE}
+cleansed.data[cleansed.data$X == 9274, ]$magnet_dumbbell_y <- 426
+```
+
+#Feature Selection
+As described in the Exploratory Analysis section, all 'summary' variables were removed from the dataset. The following code was used to remove the variables:
+
+```{r eval=FALSE}
+max.col.id <- grep("max_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -max.col.id]
+min.col.id <- grep("min_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -min.col.id]
+stddev.col.id <- grep("stddev_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -stddev.col.id]
+var.col.id <- grep("var_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -var.col.id]
+kurtosis.col.id <- grep("kurtosis_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -kurtosis.col.id]
+skewness.col.id <- grep("skewness_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -skewness.col.id]
+amplitude.col.id <- grep("amplitude_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -amplitude.col.id]
+avg.col.id <- grep("avg_", colnames(cleansed.data))
+cleansed.data <- cleansed.data[, -avg.col.id]
+```
+
+Visualising the data called attention to the fact that the data depends on the subject being measured. However since the aim is to make the prediction model as generic as possible, the author chose to exclude the *user_name* variable from play.
+
+Given the author's decision regarding 'summary' variables, the following columns were removed from the dataset:
+
+- X
+- raw_timestamp_part_1
+- raw_timestamp_part_2
+- cvtd_timestamp
+- new_window
+- num_window
+
+Finally highly correlated (threshold set at 0.75) predictors were identified and dropped from the dataset:
+
+```{r eval=FALSE}
+high.cor.predictors <- findCorrelation(data.cor, cutoff = .75)
+high.cor.predictors.name <- colnames(training.data[ , (high.cor.predictors + 1)])
+training.data <- training.data[ , -(high.cor.predictors + 1)]
+```
+
+The following is the list of variables that were removed:
+
+```{r echo=FALSE}
+high.cor.predictors.name
+```
+
+#Model Fitting
+As mentioned earlier, the chosen algorithm was a Random Forest. A 50-50 split on the data was performed to generate the training and testing data. The model was trained using 5-fold cross-validation.
+```{r eval=FALSE}
+training.idx <-createDataPartition(y=training.data$classe,p=0.5,list=FALSE)
+training.set.ex.users <-  training.data[training.idx,-1]
+
+rf_model.ex.users <- train(x = testing.set.ex.users[, -35],
+                           y = testing.set.ex.users[, 35],
+                           data = testing.set.ex.users,
+                           method="rf",
+                           trControl = trainControl(method="cv",number=5),
+                           prox=TRUE)
+```
+
+The overall accuracy of the fitted model is `r confusionMatrix(total.pred.ex.users,training.data[,36])$overall['Accuracy']`. The table below is the confusion matrix for all data:
+
+```{r echo=FALSE}
+kable(confusionMatrix(total.pred.ex.users,training.data[,36])[2])
+```
+
+#Conclusion
+The author demonstrated that the prediction of activity quality based on accelerometer data is possible. The calculated theoretical accuracy of **99.31%** was  moderated by the out of sample test data accuracy of **95%**. Many amendments to the overall model development process could be made to improve the prediction algorithm such as cross-validation across model types, delving into the reasons for the misclassifications shown in the confusion matrix or transforming the skewness and modes out of the data.
